@@ -317,7 +317,7 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     sectionId: 'connectivity',
     labelKey: L('api_keys.label'),
     yamlKeys: ['access', 'api-keys'],
-    keywords: ['api key', 'apikey', 'token'],
+    keywords: ['api key', 'apikey', 'token', 'key-credentials', 'accounts', 'limited key'],
   },
   {
     fieldId: 'tlsEnable',

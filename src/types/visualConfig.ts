@@ -115,6 +115,12 @@ export type PluginStoreAuthRule = {
   allowInsecure: boolean;
 };
 
+/** access.key-credentials entry: the client key may only use accounts matching these globs. */
+export type KeyCredentialEntry = {
+  key: string;
+  credentials: string[];
+};
+
 /** UI draft keys; YAML persistence uses the v8 tree, not these flattened names. */
 export type VisualConfigValues = {
   githubToken: string;
@@ -167,6 +173,8 @@ export type VisualConfigValues = {
   authDir: string;
   /** Client authentication keys at access.api-keys (never the upstream api-keys map). */
   apiKeysText: string;
+  /** access.key-credentials; a key without an entry may use every account. */
+  keyCredentials: KeyCredentialEntry[];
   pluginsEnabled: boolean;
   pluginStoreSources: string[];
   pluginStoreAuth: PluginStoreAuthRule[];
@@ -271,6 +279,7 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   rmPanelRepo: '',
   authDir: '',
   apiKeysText: '',
+  keyCredentials: [],
   pluginsEnabled: false,
   pluginStoreSources: [],
   pluginStoreAuth: [],

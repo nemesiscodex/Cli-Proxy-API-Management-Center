@@ -28,6 +28,12 @@ import {
 } from '@/features/config/visualConfigAdditions';
 
 import {
+  areKeyCredentialsEqual,
+  parseKeyCredentials,
+  serializeKeyCredentialsForYaml,
+} from '@/features/config/keyCredentials';
+
+import {
   SERVER_FIELDS,
   readVisualServer,
   writeVisualServer,
@@ -1281,6 +1287,12 @@ function getNextDirtyFields(
       areStringArraysEqual(nextValues.devinSensitiveWords, baselineValues.devinSensitiveWords)
     );
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'keyCredentials')) {
+    updateDirty(
+      'keyCredentials',
+      areKeyCredentialsEqual(nextValues.keyCredentials, baselineValues.keyCredentials)
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'pluginStoreAuth')) {
     updateDirty(
       'pluginStoreAuth',
@@ -1459,6 +1471,7 @@ function parseVisualValuesFromYaml(yamlContent: string): VisualConfigValues {
 
     authDir: typeof v8Oauth?.['auth-dir'] === 'string' ? v8Oauth?.['auth-dir'] : '',
     apiKeysText: parseApiKeysText(asRecord(parsed.access)?.['api-keys']),
+    keyCredentials: parseKeyCredentials(asRecord(parsed.access)?.['key-credentials']),
     pluginsEnabled: Boolean(plugins?.enabled),
     pluginStoreSources: parseStringList(plugins?.['store-sources']),
     pluginStoreAuth: parsePluginStoreAuthRules(plugins?.['store-auth']),
@@ -1745,6 +1758,14 @@ export function useVisualConfig() {
             doc.setIn(['access', 'api-keys'], apiKeys);
           } else if (docHas(doc, ['access', 'api-keys'])) {
             doc.deleteIn(['access', 'api-keys']);
+          }
+        }
+        if (dirtyFields.has('keyCredentials')) {
+          const keyCredentials = serializeKeyCredentialsForYaml(values.keyCredentials);
+          if (keyCredentials.length > 0) {
+            doc.setIn(['access', 'key-credentials'], keyCredentials);
+          } else if (docHas(doc, ['access', 'key-credentials'])) {
+            doc.deleteIn(['access', 'key-credentials']);
           }
         }
 
