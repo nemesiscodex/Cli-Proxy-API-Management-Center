@@ -151,6 +151,54 @@
   }
 }
 
+.apiKeyAccessRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.apiKeyAccountList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.apiKeyAccount {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+
+  input {
+    width: 14px;
+    height: 14px;
+    margin-top: 3px;
+    accent-color: var(--primary-color);
+  }
+}
+
+.apiKeyAccountText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.apiKeyAccountId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
 /* 强度参考条：四段承载档位，颜色承载严重度。
    段的填充走 scaleX（只碰 transform），键入时逐字重算也不掉帧。 */
 

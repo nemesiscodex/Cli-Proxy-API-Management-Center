@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { I18nextProvider } from 'react-i18next';
 import { parse as parseYaml } from 'yaml';
+import i18n from '@/i18n';
+import { ApiKeysField } from '../src/features/config/components/fields/sharedFields';
+import { DEFAULT_VISUAL_VALUES } from '../src/types/visualConfig';
 import {
   dropKeyCredentials,
   parseKeyCredentials,
@@ -137,6 +143,29 @@ describe('access.key-credentials visual config', () => {
       selected: ['claude-a@example.com.json'],
       extra: ['codex-*.json', 'claude:apikey:abc'],
     });
+  });
+
+  test('key rows summarize which accounts each key may use', () => {
+    const values = {
+      ...DEFAULT_VISUAL_VALUES,
+      apiKeysText: 'main-key\nlimited-key\nsingle-key',
+      keyCredentials: [
+        { key: 'limited-key', credentials: ['a.json', 'codex-*.json'] },
+        { key: 'single-key', credentials: ['a.json'] },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      createElement(
+        I18nextProvider,
+        { i18n: i18n.cloneInstance({ lng: 'en' }) },
+        createElement(ApiKeysField, { values, disabled: false, onChange: () => {} })
+      )
+    );
+    expect(markup.match(/class="pill">([^<]+)</g)?.filter((pill) => !pill.includes('#'))).toEqual([
+      'class="pill">All accounts<',
+      'class="pill">Limited: 2 accounts<',
+      'class="pill">Limited: 1 account<',
+    ]);
   });
 
   test('credential listing keeps the account id', () => {
