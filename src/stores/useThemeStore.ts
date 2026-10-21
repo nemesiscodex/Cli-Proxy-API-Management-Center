@@ -16,6 +16,8 @@ interface ThemeState {
   resolvedTheme: ResolvedTheme;
   setTheme: (theme: Theme) => void;
   initializeTheme: () => () => void;
+  /** The quota embed takes light/dark from T3 without touching the saved `theme`. */
+  followEmbedMode: (mode: ResolvedTheme) => void;
 }
 
 const getSystemTheme = (): ResolvedTheme => {
@@ -57,6 +59,8 @@ const applyTheme = (resolved: AppliedTheme) => {
   document.documentElement.removeAttribute('data-theme');
 };
 
+let embedMode: ResolvedTheme | null = null;
+
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set, get) => ({
@@ -86,7 +90,7 @@ export const useThemeStore = create<ThemeState>()(
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         const listener = () => {
           const { theme: currentTheme } = get();
-          if (currentTheme === 'auto') {
+          if (currentTheme === 'auto' && embedMode === null) {
             const resolved = resolveAutoTheme();
             applyTheme(resolved);
             set({ resolvedTheme: normalizeResolvedTheme(resolved) });
@@ -96,6 +100,12 @@ export const useThemeStore = create<ThemeState>()(
         mediaQuery.addEventListener('change', listener);
 
         return () => mediaQuery.removeEventListener('change', listener);
+      },
+
+      followEmbedMode: (mode) => {
+        embedMode = mode;
+        applyTheme(mode);
+        set({ resolvedTheme: mode });
       },
     }),
     {
