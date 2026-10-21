@@ -62,7 +62,11 @@ const SKELETON_CARD_COUNT = 6;
  */
 const displayNameFor = (name: string) => name;
 
-export function QuotaPage() {
+/**
+ * `embedded` renders only the cards, pagination and timeline for `#/embed/quota`:
+ * no header, tabs, search or sort, and every visible quota loads once on mount.
+ */
+export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
@@ -70,9 +74,11 @@ export function QuotaPage() {
   const [files, setFiles] = useState<AuthFileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<QuotaTabId>(() => readQuotaUiState()?.tab ?? 'all');
-  const [sortMode, setSortMode] = useState<QuotaSortMode>(
-    () => readQuotaUiState()?.sortMode ?? 'default'
+  const [tab, setTab] = useState<QuotaTabId>(() =>
+    embedded ? 'all' : (readQuotaUiState()?.tab ?? 'all')
+  );
+  const [sortMode, setSortMode] = useState<QuotaSortMode>(() =>
+    embedded ? 'default' : (readQuotaUiState()?.sortMode ?? 'default')
   );
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -242,7 +248,8 @@ export function QuotaPage() {
   const { batchLoading, loadQuota } = useQuotaBatchLoader();
   const { resettingQuotaName, refreshQuota, resetQuota } = useQuotaActions(disableControls);
 
-  const pendingRefreshRef = useRef<number | null>(null);
+  // The embed has no "Refresh all" button, so it starts with one already requested.
+  const pendingRefreshRef = useRef<number | null>(embedded ? sessionGeneration : null);
   const prevLoadingRef = useRef(loading);
 
   // 刷新全部：先重取文件列表，待其落定（loading 下降沿）再批量拉当前页额度
@@ -314,64 +321,70 @@ export function QuotaPage() {
 
   return (
     <div className={styles.page} ref={revealRef}>
-      <QuotaHeader
-        totalCount={entries.length}
-        loadedCount={loadedCount}
-        attentionCount={attentionCount}
-        refreshing={loading || batchLoading}
-        disableControls={disableControls}
-        onRefreshAll={handleRefreshAll}
-      />
+      {!embedded && (
+        <QuotaHeader
+          totalCount={entries.length}
+          loadedCount={loadedCount}
+          attentionCount={attentionCount}
+          refreshing={loading || batchLoading}
+          disableControls={disableControls}
+          onRefreshAll={handleRefreshAll}
+        />
+      )}
 
       <section className={styles.workbench}>
-        {/* 提供商导航与搜索工具栏分层，避免不同控件争夺视觉焦点。 */}
-        <div className={styles.tabsRow} data-reveal>
-          <ProviderTabs
-            types={TAB_IDS}
-            counts={tabCounts}
-            active={tab}
-            resolvedTheme={resolvedTheme}
-            onChange={handleTabChange}
-          />
-        </div>
+        {!embedded && (
+          <>
+            {/* 提供商导航与搜索工具栏分层，避免不同控件争夺视觉焦点。 */}
+            <div className={styles.tabsRow} data-reveal>
+              <ProviderTabs
+                types={TAB_IDS}
+                counts={tabCounts}
+                active={tab}
+                resolvedTheme={resolvedTheme}
+                onChange={handleTabChange}
+              />
+            </div>
 
-        <div className={styles.toolbar}>
-          <div className={styles.search}>
-            <IconSearch size={16} className={styles.searchIcon} aria-hidden="true" />
-            <input
-              ref={searchInputRef}
-              className={styles.searchInput}
-              type="search"
-              value={search}
-              onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder={t('quota_management.search_placeholder')}
-              aria-label={t('quota_management.search_label')}
-            />
-            {search && (
-              <button
-                type="button"
-                className={styles.clearSearch}
-                aria-label={t('quota_management.search_clear')}
-                title={t('quota_management.search_clear')}
-                onClick={() => {
-                  handleSearchChange('');
-                  searchInputRef.current?.focus();
-                }}
-              >
-                <IconX size={14} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <div className={styles.sort}>
-            <Select
-              value={sortMode}
-              options={sortOptions}
-              onChange={handleSortModeChange}
-              ariaLabel={t('quota_management.sort_label')}
-              size="sm"
-            />
-          </div>
-        </div>
+            <div className={styles.toolbar}>
+              <div className={styles.search}>
+                <IconSearch size={16} className={styles.searchIcon} aria-hidden="true" />
+                <input
+                  ref={searchInputRef}
+                  className={styles.searchInput}
+                  type="search"
+                  value={search}
+                  onChange={(event) => handleSearchChange(event.target.value)}
+                  placeholder={t('quota_management.search_placeholder')}
+                  aria-label={t('quota_management.search_label')}
+                />
+                {search && (
+                  <button
+                    type="button"
+                    className={styles.clearSearch}
+                    aria-label={t('quota_management.search_clear')}
+                    title={t('quota_management.search_clear')}
+                    onClick={() => {
+                      handleSearchChange('');
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    <IconX size={14} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+              <div className={styles.sort}>
+                <Select
+                  value={sortMode}
+                  options={sortOptions}
+                  onChange={handleSortModeChange}
+                  ariaLabel={t('quota_management.sort_label')}
+                  size="sm"
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         {error && (
           <div className={styles.errorBanner} role="alert">

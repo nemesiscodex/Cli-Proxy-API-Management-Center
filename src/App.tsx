@@ -5,6 +5,7 @@ import { NotificationContainer } from '@/components/common/NotificationContainer
 import { ConfirmationModal } from '@/components/common/ConfirmationModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/router/ProtectedRoute';
+import { QuotaEmbedPage } from '@/features/quota/QuotaEmbedPage';
 import { useLanguageStore, useThemeStore } from '@/stores';
 
 function RootShell() {
@@ -22,6 +23,14 @@ const router = createHashRouter([
     element: <RootShell />,
     children: [
       { path: '/login', element: <LoginPage /> },
+      {
+        path: '/embed/quota',
+        element: (
+          <ProtectedRoute>
+            <QuotaEmbedPage />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: '/*',
         element: (
