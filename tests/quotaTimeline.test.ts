@@ -171,6 +171,27 @@ describe('buildTimelineLane', () => {
     expect(lane.remaining).toBe(30);
   });
 
+  test('claude: keeps the weekly lane on the account quota instead of a model quota', () => {
+    const accountReset = at(2026, 10, 2, 0);
+    const sonnetReset = at(2026, 9, 29, 20);
+    const lane = buildTimelineLane({
+      ...base,
+      provider: 'claude',
+      quota: {
+        status: 'success',
+        windows: [
+          { id: 'five-hour', usedPercent: 3, resetAtMs: at(2026, 9, 26, 17), periodHours: 5 },
+          { id: 'seven-day', usedPercent: 7, resetAtMs: accountReset, periodHours: 168 },
+          { id: 'seven-day-sonnet', usedPercent: 0, resetAtMs: sonnetReset, periodHours: 168 },
+        ],
+      },
+      maxPeriodHours: 168,
+    });
+
+    expect(lane.anchorMs).toBe(accountReset);
+    expect(lane.remaining).toBe(93);
+  });
+
   test('kimi: derives remaining from raw used/limit counts', () => {
     const lane = buildTimelineLane({
       ...base,
