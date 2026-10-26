@@ -24,6 +24,10 @@ const FUTURE_USAGE_MULTIPLIER: Record<FutureUsage, number> = {
   none: 0,
 };
 
+/** What the pool chart plots: remaining capacity, or the rate it drains at. */
+export const POOL_CHART_MODES = ['remaining', 'drain'] as const;
+export type PoolChartMode = (typeof POOL_CHART_MODES)[number];
+
 export const BURN_WINDOW_HOURS = [1, 3, 6] as const;
 export type BurnWindowHours = (typeof BURN_WINDOW_HOURS)[number];
 

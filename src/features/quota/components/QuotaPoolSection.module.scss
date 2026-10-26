@@ -1,0 +1,152 @@
+@use '../../../styles/mixins' as *;
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+
+%control-button {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-hover, 200ms) var(--ease-out-strong, ease-out),
+    color var(--dur-hover, 200ms) var(--ease-out-strong, ease-out);
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+
+  &[aria-pressed='true'] {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+
+  button {
+    @extend %control-button;
+  }
+}
+
+.label {
+  margin-left: 6px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.usage {
+  min-width: 140px;
+
+  button[aria-haspopup='listbox'] {
+    height: 36px;
+    border-color: transparent;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    box-shadow: none;
+    color: var(--text-primary);
+  }
+}
+
+.toggle {
+  @extend %control-button;
+  height: 36px;
+  margin-left: 6px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+
+  &[aria-pressed='true'] {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px var(--border-hover);
+  }
+}
+
+.rangeNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.rangeText {
+  margin-right: 6px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.navButton {
+  @extend %control-button;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+
+.navNext svg {
+  transform: scaleX(-1);
+}
+
+.todayButton {
+  @extend %control-button;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+
+  &[aria-pressed='true'] {
+    background: var(--bg-secondary);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .segmented button:hover,
+  .toggle:hover,
+  .navButton:hover,
+  .todayButton:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+@include mobile {
+  .rangeNav {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented button,
+  .toggle,
+  .navButton,
+  .todayButton {
+    transition: none;
+  }
+}

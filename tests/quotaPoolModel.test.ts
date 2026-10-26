@@ -1,4 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import i18n from '@/i18n';
+import { QuotaPoolCard, type QuotaPoolCardProps } from '@/features/quota/components/QuotaPoolCard';
 import {
   POOL_PLAN_WEIGHTS,
   buildPoolView,
@@ -389,5 +393,76 @@ describe('quota history store', () => {
     pruneQuotaHistory(LOCAL, (id) => id !== 'claude:gone.json', storage);
 
     expect(Object.keys(readQuotaHistory(LOCAL, storage))).toEqual(['claude:here.json']);
+  });
+});
+
+describe('QuotaPoolCard rendering', () => {
+  const original = i18n.language;
+  beforeAll(() => i18n.changeLanguage('en'));
+  afterAll(() => i18n.changeLanguage(original));
+
+  const render = (overrides: Partial<QuotaPoolCardProps> = {}) => {
+    const accounts = [
+      account({
+        id: 'codex:pro.json',
+        label: 'Codex 1',
+        weight: 2.5,
+        remaining: 40,
+        resetAtMs: NOW + 2 * DAY,
+        periodHours: 168,
+        history: draining(40, 2),
+      }),
+      account({ id: 'codex:plus.json', label: 'Codex 2', remaining: 50 }),
+    ];
+    const view = buildPoolView(accounts, options());
+    return renderToStaticMarkup(
+      createElement(QuotaPoolCard, {
+        provider: 'codex',
+        accountCount: accounts.length,
+        view,
+        mode: 'remaining',
+        showAccounts: false,
+        rangeStartMs: NOW - 3 * DAY,
+        rangeEndMs: NOW + 11 * DAY,
+        nowMs: NOW,
+        horizonEndMs: NOW + 14 * DAY,
+        burnWindowHours: 3,
+        weightNotes: ['Pro 200 = 2.5x'],
+        resolvedTheme: 'dark',
+        ...overrides,
+      })
+    );
+  };
+
+  test('shows the pool total, capacity, weight note and stats', () => {
+    const markup = render();
+    expect(markup).toContain('>150%<');
+    expect(markup).toContain('of 350%');
+    expect(markup).toContain('Pro 200 = 2.5x');
+    expect(markup).toContain('Burn, last 3h');
+    expect(markup).toContain('5.0%/h');
+    // Codex 1 empties after 20h, then its reset adds 2.5 x 100.
+    expect(markup).toContain('<strong>+250%</strong>');
+    expect(markup).toContain('Codex 1 in 20h 0m');
+  });
+
+  test('names the chart for assistive technology', () => {
+    expect(render()).toMatch(
+      /role="img" aria-label="Codex pool: 150% of 350% remaining\. Pool empty: Not by [^"]+\. Burn: 5\.0%\/h\."/
+    );
+  });
+
+  test('draws recorded solid and projected dashed lines, and per-account lines on request', () => {
+    const markup = render();
+    expect(markup).toMatch(/<path data-series="recorded" d="M[^"]+"/);
+    expect(markup).toMatch(/<path data-series="projected" stroke-dasharray="6 5" d="M[^"]+"/);
+    expect(markup).not.toContain('data-series="account"');
+    expect(render({ showAccounts: true }).match(/data-series="account"/g)?.length).toBe(2);
+  });
+
+  test('switches the axis to rates in the drain view', () => {
+    const markup = render({ mode: 'drain' });
+    expect(markup).toContain('Codex drain rate: 5.0%/h over the last 3h.');
+    expect(markup).toContain('%/h</text>');
   });
 });
