@@ -1,5 +1,5 @@
 /**
- * 额度查询页：提供商 tabs + 统一卡网格。
+ * 额度查询页：提供商 tabs + 额度池图表 + 统一卡网格。
  *
  * 保留的行为契约（重设计不改）：
  * - 现有提供商保持点击加载；Devin 首次可见时主动查询一次，不轮询；
@@ -21,11 +21,12 @@ import { useNow } from '@/hooks/useNow';
 import { useRevealGroup } from '@/hooks/motion';
 import { useAuthStore, useQuotaStore, useThemeStore } from '@/stores';
 import type { AuthFileItem, ResolvedTheme } from '@/types';
-import { getQuotaCacheKey } from '@/utils/quota/identity';
+import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import { ProviderTabs } from '@/features/authFiles/components/ProviderTabs';
+import { getTypeLabel } from '@/features/authFiles/constants';
 import { QuotaHeader } from './components/QuotaHeader';
 import { QuotaCard } from './components/QuotaCard';
-import { QuotaTimeline } from './components/QuotaTimeline';
+import { QuotaPoolSection } from './components/QuotaPoolSection';
 import {
   CARD_ENTRANCE_BUDGET_MS,
   QUOTA_PAGE_SIZE,
@@ -35,6 +36,7 @@ import {
   type QuotaTabId,
 } from './constants';
 import {
+  buildAccountLabels,
   buildTabCounts,
   canRefreshQuotaAfterList,
   classifyQuotaFiles,
@@ -50,6 +52,8 @@ import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
+import { pruneQuotaHistory } from './quotaHistory';
+import { cacheKeyOfPoolAccountId, poolAccountId } from './quotaPoolModel';
 import { readQuotaUiState, writeQuotaUiState } from './uiState';
 import styles from './QuotaPage.module.scss';
 
@@ -57,18 +61,14 @@ const TAB_IDS: string[] = ['all', ...QUOTA_TAB_ORDER];
 const SKELETON_CARD_COUNT = 6;
 
 /**
- * Existing providers display filenames; Devin's card and timeline share an
- * identity-aware display label. Keep the filename fallback stable for memoization.
- */
-const displayNameFor = (name: string) => name;
-
-/**
- * `embedded` renders only the cards, pagination and timeline for `#/embed/quota`:
- * no header, tabs, search or sort, and every visible quota loads once on mount.
+ * `embedded` renders only the pool charts, cards and pagination for `#/embed/quota`:
+ * no header, tabs, chart toolbar, search or sort, and every visible quota loads
+ * once on mount. Emails stay hidden there.
  */
 export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const connection = useAuthStore((state) => state.apiBase);
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
@@ -79,6 +79,9 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
   );
   const [sortMode, setSortMode] = useState<QuotaSortMode>(() =>
     embedded ? 'default' : (readQuotaUiState()?.sortMode ?? 'default')
+  );
+  const [showEmails, setShowEmails] = useState<boolean>(() =>
+    embedded ? false : (readQuotaUiState()?.showEmails ?? false)
   );
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -169,10 +172,28 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
 
   const entries = useMemo(() => classifyQuotaFiles(files), [files]);
   const tabCounts = useMemo(() => buildTabCounts(entries), [entries]);
+  const tabEntries = useMemo(() => filterEntriesByTab(entries, tab), [entries, tab]);
   const filteredEntries = useMemo(
-    () => filterEntriesBySearch(filterEntriesByTab(entries, tab), search),
-    [entries, tab, search]
+    () => filterEntriesBySearch(tabEntries, search),
+    [tabEntries, search]
   );
+
+  const accountLabels = useMemo(
+    () => buildAccountLabels(entries, showEmails, (type) => getTypeLabel(t, type)),
+    [entries, showEmails, t]
+  );
+  const labelFor = useCallback(
+    (entry: QuotaFileEntry) =>
+      accountLabels.get(poolAccountId(entry.type, getQuotaCacheKey(entry.file))) ??
+      getQuotaDisplayName(entry.file),
+    [accountLabels]
+  );
+  const handleToggleEmails = useCallback(() => {
+    setShowEmails((current) => {
+      writeQuotaUiState({ showEmails: !current });
+      return !current;
+    });
+  }, []);
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
     setPage(1);
@@ -241,7 +262,11 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
         return next;
       });
     });
-  }, [entries, error, filesGeneration, loading, sessionGeneration]);
+
+    // Local history follows the credential list, not the enabled subset.
+    const existing = new Set(files.map(getQuotaCacheKey));
+    pruneQuotaHistory(connection, (id) => existing.has(cacheKeyOfPoolAccountId(id)));
+  }, [connection, entries, error, files, filesGeneration, loading, sessionGeneration]);
 
   /* ---------- 加载与操作 ---------- */
 
@@ -328,6 +353,8 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
           attentionCount={attentionCount}
           refreshing={loading || batchLoading}
           disableControls={disableControls}
+          showEmails={showEmails}
+          onToggleEmails={handleToggleEmails}
           onRefreshAll={handleRefreshAll}
         />
       )}
@@ -345,7 +372,25 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
                 onChange={handleTabChange}
               />
             </div>
+          </>
+        )}
 
+        {error && (
+          <div className={styles.errorBanner} role="alert">
+            {error}
+          </div>
+        )}
+
+        <QuotaPoolSection
+          entries={tabEntries}
+          quotaFor={getQuota}
+          labelFor={labelFor}
+          resolvedTheme={resolvedTheme}
+          showControls={!embedded}
+        />
+
+        {!embedded && (
+          <>
             <div className={styles.toolbar}>
               <div className={styles.search}>
                 <IconSearch size={16} className={styles.searchIcon} aria-hidden="true" />
@@ -384,12 +429,6 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </div>
           </>
-        )}
-
-        {error && (
-          <div className={styles.errorBanner} role="alert">
-            {error}
-          </div>
         )}
 
         {loading ? (
@@ -432,6 +471,7 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
               <QuotaCard
                 key={`${entry.type}:${getQuotaCacheKey(entry.file)}`}
                 entry={entry}
+                label={labelFor(entry)}
                 quota={getQuota(entry)}
                 resolvedTheme={resolvedTheme}
                 canRefresh={canUseActions && !entry.file.disabled}
@@ -471,14 +511,6 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
             </Button>
           </div>
         )}
-
-        {/* 时间线只比较当前页凭证，避免大量凭证一次性生成无界泳道。 */}
-        <QuotaTimeline
-          entries={pageItems}
-          quotaFor={getQuota}
-          displayNameFor={displayNameFor}
-          resolvedTheme={resolvedTheme}
-        />
       </section>
     </div>
   );

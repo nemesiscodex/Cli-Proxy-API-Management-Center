@@ -4,7 +4,7 @@ import { QuotaPage } from './QuotaPage';
 import { EMBED_READY_MESSAGE, embedThemeVariables, parseT3ThemeMessage } from './embedTheme';
 import styles from './QuotaEmbedPage.module.scss';
 
-/** Quota cards and timeline without app chrome, themed by the T3 window that iframes it. */
+/** Quota pool charts and cards without app chrome, themed by the T3 window that iframes it. */
 export function QuotaEmbedPage() {
   const followEmbedMode = useThemeStore((state) => state.followEmbedMode);
 

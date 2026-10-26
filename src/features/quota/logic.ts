@@ -4,6 +4,7 @@
  */
 
 import type { AuthFileItem } from '@/types';
+import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import { ANTIGRAVITY_CONFIG } from './providers/antigravity/data';
 import { CLAUDE_CONFIG } from './providers/claude/data';
 import { CODEX_CONFIG } from './providers/codex/data';
@@ -13,6 +14,7 @@ import { META_CONFIG } from './providers/meta/data';
 import { XAI_CONFIG } from './providers/xai/data';
 import type { QuotaProviderType } from './providers/types';
 import { QUOTA_TAB_ORDER, type QuotaSortMode, type QuotaTabId } from './constants';
+import { poolAccountId } from './quotaPoolModel';
 
 const QUOTA_FILTER_MAP: Record<QuotaProviderType, (file: AuthFileItem) => boolean> = {
   antigravity: ANTIGRAVITY_CONFIG.filterFn,
@@ -121,6 +123,32 @@ export function buildTabCounts(entries: QuotaFileEntry[]): Record<string, number
     counts[entry.type] += 1;
   }
   return counts;
+}
+
+/**
+ * Card and chart label per account, keyed by `poolAccountId`. Hidden emails
+ * read `<Provider> <n>`, numbered 1.. in list order within each provider, so a
+ * number stays with its account across tabs, search and sort. Shown emails use
+ * the account email, falling back to the display name.
+ */
+export function buildAccountLabels(
+  entries: QuotaFileEntry[],
+  showEmails: boolean,
+  providerLabel: (type: QuotaProviderType) => string
+): Map<string, string> {
+  const labels = new Map<string, string>();
+  const counters = new Map<QuotaProviderType, number>();
+  for (const { file, type } of entries) {
+    const index = (counters.get(type) ?? 0) + 1;
+    counters.set(type, index);
+    labels.set(
+      poolAccountId(type, getQuotaCacheKey(file)),
+      showEmails
+        ? (typeof file.email === 'string' && file.email.trim()) || getQuotaDisplayName(file)
+        : `${providerLabel(type)} ${index}`
+    );
+  }
+  return labels;
 }
 
 export const isQuotaRefreshDisabled = (

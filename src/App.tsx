@@ -6,6 +6,7 @@ import { ConfirmationModal } from '@/components/common/ConfirmationModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/router/ProtectedRoute';
 import { QuotaEmbedPage } from '@/features/quota/QuotaEmbedPage';
+import { installQuotaHistoryRecorder } from '@/features/quota/quotaHistoryRecorder';
 import { useLanguageStore, useThemeStore } from '@/stores';
 
 function RootShell() {
@@ -52,6 +53,8 @@ function App() {
     const cleanupTheme = initializeTheme();
     return cleanupTheme;
   }, [initializeTheme]);
+
+  useEffect(() => installQuotaHistoryRecorder(), []);
 
   useEffect(() => {
     setLanguage(language);

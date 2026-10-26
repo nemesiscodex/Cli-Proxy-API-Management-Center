@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { QUOTA_PAGE_SIZE } from '@/features/quota/constants';
 import {
+  buildAccountLabels,
   buildTabCounts,
   canRefreshQuotaAfterList,
   classifyQuotaFiles,
@@ -249,5 +250,28 @@ describe('sortQuotaEntries', () => {
     const last = entries[entries.length - 1].file.name;
     const sorted = sortQuotaEntries(entries, 'soonest', resolver({ [last]: 1 }));
     expect(paginate(sorted, 1, 2).pageItems[0].file.name).toBe(last);
+  });
+});
+
+describe('buildAccountLabels', () => {
+  const entries = classifyQuotaFiles([
+    { name: 'codex-a.json', type: 'codex', email: 'a@example.com' },
+    { name: 'claude-x.json', type: 'claude', email: 'x@example.com' },
+    { name: 'claude-y.json', type: 'claude' },
+  ]);
+  const providerLabel = (type: string) => type.toUpperCase();
+
+  test('hides emails behind a per-provider number in list order', () => {
+    const labels = buildAccountLabels(entries, false, providerLabel);
+    expect(labels.get('claude:claude-x.json')).toBe('CLAUDE 1');
+    expect(labels.get('claude:claude-y.json')).toBe('CLAUDE 2');
+    expect(labels.get('codex:codex-a.json')).toBe('CODEX 1');
+    expect([...labels.values()].some((label) => label.includes('@'))).toBe(false);
+  });
+
+  test('shows the email, or the file name when there is none', () => {
+    const labels = buildAccountLabels(entries, true, providerLabel);
+    expect(labels.get('claude:claude-x.json')).toBe('x@example.com');
+    expect(labels.get('claude:claude-y.json')).toBe('claude-y.json');
   });
 });

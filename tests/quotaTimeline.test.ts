@@ -1,18 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  DAY_MS,
-  HOUR_MS,
   buildTimelineLane,
-  laneHasWindow,
   pickLaneWindow,
-  projectLane,
-  projectResetCredits,
   startOfDay,
-  startOfWeek,
-  timelineSpan,
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
-import type { TimelineLane } from '../src/features/quota/quotaTimelineModel';
+import { DAY_MS, HOUR_MS } from '../src/utils/time/durations';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).getTime();
 
@@ -60,139 +53,9 @@ describe('windowsIn', () => {
   });
 });
 
-describe('span boundaries', () => {
-  test('startOfDay and startOfWeek land on local midnight', () => {
-    const mid = at(2026, 6, 29, 14, 37);
-    expect(new Date(startOfDay(mid)).getHours()).toBe(0);
-    expect(new Date(startOfWeek(mid)).getDay()).toBe(0);
-    expect(new Date(startOfWeek(mid)).getHours()).toBe(0);
-  });
-
-  test('weekly span is a fortnight from the containing Sunday', () => {
-    const now = at(2026, 6, 29, 14, 0); // a Wednesday
-    const span = timelineSpan('weekly', 0, now);
-
-    expect(new Date(span.startMs).getDay()).toBe(0);
-    expect(span.days).toBe(14);
-    expect(span.startMs).toBeLessThanOrEqual(now);
-    expect(span.endMs).toBeGreaterThan(now);
-  });
-
-  test('offsets step a week in weekly mode and a day in session mode', () => {
-    const now = at(2026, 6, 29, 14, 0);
-    const weekly = timelineSpan('weekly', 0, now);
-    const weeklyNext = timelineSpan('weekly', 1, now);
-    expect(Math.round((weeklyNext.startMs - weekly.startMs) / DAY_MS)).toBe(7);
-
-    const session = timelineSpan('session', 0, now);
-    const sessionNext = timelineSpan('session', 1, now);
-    expect(Math.round((sessionNext.startMs - session.startMs) / DAY_MS)).toBe(1);
-    expect(session.days).toBe(3);
-  });
-
-  test('spans a whole number of days even across a DST transition', () => {
-    // US DST springs forward 2026-03-08; a fixed +14*DAY_MS would land at 23:00.
-    const span = timelineSpan('weekly', 0, at(2026, 2, 10, 12));
-    expect(new Date(span.startMs).getHours()).toBe(0);
-    expect(new Date(span.endMs).getHours()).toBe(0);
-  });
-});
-
-describe('projectLane', () => {
-  const lane = (over: Partial<TimelineLane> = {}): TimelineLane => ({
-    name: 'a.json',
-    displayName: 'Alice',
-    provider: 'claude',
-    anchorMs: at(2026, 6, 29, 20),
-    periodHours: 24 * 7,
-    remaining: 40,
-    limits: [],
-    resetCredits: [],
-    ...over,
-  });
-
-  const span = timelineSpan('weekly', 0, at(2026, 6, 29, 12));
-
-  test('classifies past, live and next windows against now', () => {
-    const now = at(2026, 6, 29, 12);
-    const windows = projectLane(lane(), span.startMs, span.endMs, now, 'weekly');
-
-    expect(windows.length).toBeGreaterThan(0);
-    const live = windows.filter((w) => w.state === 'live');
-    expect(live.length).toBe(1);
-    expect(live[0].startMs).toBeLessThanOrEqual(now);
-    expect(live[0].endMs).toBeGreaterThan(now);
-    expect(live[0].remaining).toBe(40);
-    expect(windows.filter((w) => w.state === 'past').every((w) => w.endMs <= now)).toBe(true);
-    expect(windows.filter((w) => w.state === 'next').every((w) => w.startMs > now)).toBe(true);
-  });
-
-  test('does not carry stale remaining usage past the reported reset', () => {
-    const nowAfterReset = at(2026, 6, 30, 12);
-    const windows = projectLane(lane(), span.startMs, span.endMs, nowAfterReset, 'weekly');
-    const live = windows.find((window) => window.state === 'live');
-
-    expect(live).toBeDefined();
-    expect(live?.startMs).toBe(at(2026, 6, 29, 20));
-    expect(live?.remaining).toBeNull();
-  });
-
-  test('clips bars to the visible span', () => {
-    const windows = projectLane(lane(), span.startMs, span.endMs, at(2026, 6, 29, 12), 'weekly');
-    for (const window of windows) {
-      expect(window.leftPercent).toBeGreaterThanOrEqual(0);
-      expect(window.widthPercent).toBeGreaterThan(0);
-      expect(window.leftPercent + window.widthPercent).toBeLessThanOrEqual(100.0001);
-    }
-  });
-
-  test('returns nothing when the lane has no anchor or period', () => {
-    const now = at(2026, 6, 29, 12);
-    expect(projectLane(lane({ anchorMs: null }), span.startMs, span.endMs, now, 'weekly')).toEqual(
-      []
-    );
-    expect(
-      projectLane(lane({ periodHours: null }), span.startMs, span.endMs, now, 'weekly')
-    ).toEqual([]);
-  });
-
-  test('session mode projects only real 5-hour windows', () => {
-    const now = at(2026, 6, 29, 12);
-    const sessionSpan = timelineSpan('session', 0, now);
-
-    expect(projectLane(lane(), sessionSpan.startMs, sessionSpan.endMs, now, 'session')).toEqual([]);
-
-    const windows = projectLane(
-      lane({ periodHours: 5 }),
-      sessionSpan.startMs,
-      sessionSpan.endMs,
-      now,
-      'session'
-    );
-    expect(windows.some((w) => w.endMs - w.startMs === 5 * HOUR_MS)).toBe(true);
-  });
-
-  test('projects only unexpired reset credits inside the visible span', () => {
-    const now = at(2026, 6, 29, 12);
-    const visibleExpiry = at(2026, 7, 2, 12);
-    const marks = projectResetCredits(
-      lane({
-        resetCredits: [
-          { id: 'expired', grantedAtMs: null, expiresAtMs: now - HOUR_MS },
-          { id: 'visible', grantedAtMs: now - DAY_MS, expiresAtMs: visibleExpiry },
-          { id: 'outside', grantedAtMs: now, expiresAtMs: span.endMs + HOUR_MS },
-        ],
-      }),
-      span.startMs,
-      span.endMs,
-      now
-    );
-
-    expect(marks).toHaveLength(1);
-    expect(marks[0].id).toBe('visible');
-    expect(marks[0].leftPercent).toBe(
-      ((visibleExpiry - span.startMs) / (span.endMs - span.startMs)) * 100
-    );
+describe('startOfDay', () => {
+  test('lands on local midnight', () => {
+    expect(new Date(startOfDay(at(2026, 6, 29, 14, 37))).getHours()).toBe(0);
   });
 });
 
@@ -273,12 +136,6 @@ describe('buildTimelineLane', () => {
     expect(session.anchorMs).toBe(soon);
     expect(session.periodHours).toBe(5);
     expect(session.remaining).toBe(80);
-
-    // Every limit is still summarized in the lane head regardless of the pick.
-    expect(weekly.limits).toEqual([
-      { label: '7-day', remaining: 7 },
-      { label: '5-hour', remaining: 80 },
-    ]);
   });
 
   test('codex: keeps the weekly lane on the account quota instead of Spark quota', () => {
@@ -314,41 +171,6 @@ describe('buildTimelineLane', () => {
     expect(lane.remaining).toBe(30);
   });
 
-  test('codex: includes available reset credits with parseable expiry dates', () => {
-    const expiresAt = '2026-08-02T12:00:00Z';
-    const lane = buildTimelineLane({
-      ...base,
-      provider: 'codex',
-      quota: {
-        status: 'success',
-        windows: [{ label: '7-day', usedPercent: 90, resetAtMs: 5000, periodHours: 168 }],
-        rateLimitResetCredits: [
-          {
-            id: 'credit-1',
-            status: 'available',
-            grantedAt: '2026-07-01T12:00:00Z',
-            expiresAt,
-          },
-          {
-            id: 'spent',
-            status: 'consumed',
-            grantedAt: '2026-07-01T12:00:00Z',
-            expiresAt,
-          },
-          { id: 'invalid', status: 'available', grantedAt: '', expiresAt: 'not-a-date' },
-        ],
-      },
-    });
-
-    expect(lane.resetCredits).toEqual([
-      {
-        id: 'credit-1',
-        grantedAtMs: new Date('2026-07-01T12:00:00Z').getTime(),
-        expiresAtMs: new Date(expiresAt).getTime(),
-      },
-    ]);
-  });
-
   test('kimi: derives remaining from raw used/limit counts', () => {
     const lane = buildTimelineLane({
       ...base,
@@ -366,10 +188,6 @@ describe('buildTimelineLane', () => {
 
     expect(lane.anchorMs).toBe(5000);
     expect(lane.remaining).toBe(46);
-    expect(lane.limits).toEqual([
-      { label: 'Daily', remaining: 46 },
-      { label: 'Monthly', remaining: 73 },
-    ]);
   });
 
   test('antigravity anchors on its bucket reset, with remaining from the fraction', () => {
@@ -395,10 +213,6 @@ describe('buildTimelineLane', () => {
     expect(lane.periodHours).toBe(168);
     // remainingFraction is REMAINING, so it is not inverted.
     expect(lane.remaining).toBe(82);
-    expect(lane.limits).toEqual([
-      { label: '5h', remaining: 40 },
-      { label: 'Weekly', remaining: 82 },
-    ]);
   });
 
   test('antigravity buckets without a parseable reset do not anchor the lane', () => {
@@ -411,7 +225,6 @@ describe('buildTimelineLane', () => {
       },
     });
     expect(lane.anchorMs).toBeNull();
-    expect(lane.limits).toEqual([]);
   });
 
   test('xai anchors on the shared weekly limit without independent product limits', () => {
@@ -436,8 +249,6 @@ describe('buildTimelineLane', () => {
     expect(lane.anchorMs).toBe(9000);
     expect(lane.periodHours).toBe(168);
     expect(lane.remaining).toBe(95);
-    // Product usage is a contribution to the total, not a separate quota pool.
-    expect(lane.limits).toEqual([]);
   });
 
   test('xai without a weekly limit produces no window at all', () => {
@@ -452,7 +263,6 @@ describe('buildTimelineLane', () => {
         },
       });
       expect(lane.anchorMs).toBeNull();
-      expect(laneHasWindow(lane)).toBe(false);
     }
   });
 
@@ -468,25 +278,7 @@ describe('buildTimelineLane', () => {
     expect(lane.periodHours).toBe(24 * 7);
   });
 
-  test('laneHasWindow drops only lanes that can never draw a bar', () => {
-    const drawable = buildTimelineLane({
-      ...base,
-      provider: 'claude',
-      quota: {
-        status: 'success',
-        windows: [{ label: '7-day', usedPercent: 10, resetAtMs: 5000, periodHours: 168 }],
-      },
-    });
-    expect(laneHasWindow(drawable)).toBe(true);
-    // Unloaded quota has nothing to show yet, so it takes no row.
-    expect(
-      laneHasWindow(buildTimelineLane({ ...base, provider: 'claude', quota: undefined }))
-    ).toBe(false);
-  });
-
-  test('providers with no usable reset produce an empty lane, not a dropped one', () => {
-    // buildTimelineLane always returns a lane; dropping is the caller's job via
-    // laneHasWindow, so the two concerns stay separately testable.
+  test('providers with no usable reset produce a lane with no anchor', () => {
     for (const provider of ['antigravity', 'xai'] as const) {
       const lane = buildTimelineLane({
         ...base,
@@ -495,7 +287,6 @@ describe('buildTimelineLane', () => {
       });
       expect(lane.name).toBe('a.json');
       expect(lane.anchorMs).toBeNull();
-      expect(lane.limits).toEqual([]);
     }
   });
 
