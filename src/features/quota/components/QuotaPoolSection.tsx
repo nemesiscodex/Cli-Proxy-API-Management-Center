@@ -24,6 +24,7 @@ import {
   POOL_HORIZON_MS,
   buildPoolView,
   poolAccountId,
+  poolHistoryId,
   poolPlanWeight,
   poolRange,
   poolWindowOf,
@@ -134,7 +135,7 @@ export function QuotaPoolSection({
           if (entry.type !== provider) return;
           const quota = quotaFor(entry);
           if (quota?.status !== 'success') return;
-          const window = poolWindowOf(provider, quota);
+          const { windowKey, ...window } = poolWindowOf(provider, quota);
           if (window.remaining === null) return;
           const plan = poolPlanWeight(provider, quota);
           if (plan) notes.set(plan.labelKey, `${t(plan.labelKey)} = ${plan.weight}x`);
@@ -144,7 +145,7 @@ export function QuotaPoolSection({
             label: labelFor(entry),
             weight: plan?.weight ?? 1,
             ...window,
-            history: history[id] ?? [],
+            history: history[poolHistoryId(id, windowKey)] ?? [],
           });
         });
         return { provider, accounts, weightNotes: Array.from(notes.values()) };

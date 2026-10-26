@@ -119,6 +119,23 @@ export const poolAccountId = (provider: QuotaProviderType, cacheKey: string): st
 
 export const cacheKeyOfPoolAccountId = (id: string): string => id.slice(id.indexOf(':') + 1);
 
+/**
+ * History is kept per account *and* window. If the window an account is read
+ * from changes, its old samples measured something else, and comparing them
+ * with new ones would show a jump that is not usage.
+ */
+export const poolHistoryId = (accountId: string, windowKey: string | null): string =>
+  JSON.stringify([accountId, windowKey]);
+
+export function accountIdOfPoolHistoryId(id: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(id);
+    return Array.isArray(parsed) && typeof parsed[0] === 'string' ? parsed[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 /* --------------------------------------------------------- plan weight */
 
 export interface PoolPlanWeight {
@@ -164,6 +181,7 @@ export interface PoolWindow {
   remaining: number | null;
   resetAtMs: number | null;
   periodHours: number | null;
+  windowKey: string | null;
 }
 
 /** An account's pool window from its loaded quota state. */
@@ -178,7 +196,12 @@ export function poolWindowOf(
     quota,
     maxPeriodHours: POOL_WINDOW_MAX_HOURS,
   });
-  return { remaining: lane.remaining, resetAtMs: lane.anchorMs, periodHours: lane.periodHours };
+  return {
+    remaining: lane.remaining,
+    resetAtMs: lane.anchorMs,
+    periodHours: lane.periodHours,
+    windowKey: lane.windowKey,
+  };
 }
 
 /* --------------------------------------------------------------- range */

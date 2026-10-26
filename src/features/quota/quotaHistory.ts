@@ -15,7 +15,8 @@ export type QuotaHistory = Readonly<Record<string, readonly PoolSample[]>>;
 export type QuotaHistoryStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 const STORAGE_PREFIX = 'quotaPage.history:';
-const STORAGE_VERSION = 1;
+/** v1 samples did not record which window they measured, so they are dropped. */
+const STORAGE_VERSION = 2;
 const MAX_AGE_MS = 21 * DAY_MS;
 const MAX_SAMPLES_PER_ACCOUNT = 3000;
 /** An unchanged value is re-sampled at most this often. */

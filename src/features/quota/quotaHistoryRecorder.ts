@@ -3,7 +3,7 @@ import { QUOTA_TAB_ORDER } from './constants';
 import { QUOTA_ADAPTERS } from './providers';
 import type { QuotaStore } from './providers/types';
 import { appendQuotaSamples } from './quotaHistory';
-import { poolAccountId, poolWindowOf } from './quotaPoolModel';
+import { poolAccountId, poolHistoryId, poolWindowOf } from './quotaPoolModel';
 
 /**
  * Record a history sample whenever any writer (batch load, single refresh,
@@ -23,8 +23,9 @@ export function installQuotaHistoryRecorder(): () => void {
       if (nextMap === prevMap) continue;
       for (const [cacheKey, state] of Object.entries(nextMap)) {
         if (state === prevMap[cacheKey] || state.status !== 'success') continue;
-        const { remaining } = poolWindowOf(type, state);
-        if (remaining !== null) samples.push({ id: poolAccountId(type, cacheKey), remaining });
+        const { remaining, windowKey } = poolWindowOf(type, state);
+        if (remaining === null) continue;
+        samples.push({ id: poolHistoryId(poolAccountId(type, cacheKey), windowKey), remaining });
       }
     }
     appendQuotaSamples(connection, samples, Date.now());

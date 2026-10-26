@@ -5,7 +5,9 @@ import i18n from '@/i18n';
 import { QuotaPoolCard, type QuotaPoolCardProps } from '@/features/quota/components/QuotaPoolCard';
 import {
   POOL_PLAN_WEIGHTS,
+  accountIdOfPoolHistoryId,
   buildPoolView,
+  poolHistoryId,
   poolPlanWeight,
   poolRange,
   type PoolAccount,
@@ -369,7 +371,7 @@ describe('quota history store', () => {
     storage.setItem(
       quotaHistoryKey(LOCAL),
       JSON.stringify({
-        v: 1,
+        v: 2,
         accounts: { a: [[NOW, 50], ['x', 1], [NOW + 1, 400], null], b: 'nope' },
       })
     );
@@ -377,6 +379,33 @@ describe('quota history store', () => {
 
     appendQuotaSamples(LOCAL, [{ id: 'a', remaining: 40 }], NOW + HOUR, storage);
     expect(readQuotaHistory(LOCAL, storage).a?.length).toBe(2);
+  });
+
+  test('drops v1 history, whose samples do not say which window they measured', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      quotaHistoryKey(LOCAL),
+      JSON.stringify({ v: 1, accounts: { 'claude:a.json': [[NOW, 100]] } })
+    );
+    expect(readQuotaHistory(LOCAL, storage)).toEqual({});
+  });
+
+  test('a change of window starts a new series instead of reading as usage', () => {
+    const accountId = 'claude:a#1.json';
+    const modelWindow = poolHistoryId(accountId, 'seven-day-sonnet');
+    const accountWindow = poolHistoryId(accountId, 'seven-day');
+    const storage = memoryStorage();
+    appendQuotaSamples(LOCAL, [{ id: modelWindow, remaining: 100 }], NOW - HOUR, storage);
+    appendQuotaSamples(LOCAL, [{ id: accountWindow, remaining: 93 }], NOW, storage);
+
+    const history = readQuotaHistory(LOCAL, storage);
+    const view = buildPoolView(
+      [account({ id: accountId, remaining: 93, history: history[accountWindow] ?? [] })],
+      options()
+    );
+    expect(view.burnPerHour).toBeNull();
+    expect(accountIdOfPoolHistoryId(accountWindow)).toBe(accountId);
+    expect(accountIdOfPoolHistoryId('not json')).toBeNull();
   });
 
   test('prunes accounts whose credential is gone', () => {

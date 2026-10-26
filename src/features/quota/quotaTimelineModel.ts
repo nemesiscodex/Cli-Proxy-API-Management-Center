@@ -22,6 +22,8 @@ export interface TimelineLane {
   periodHours: number | null;
   /** Remaining percent reported for the window ending at `anchorMs`. */
   remaining: number | null;
+  /** Which of the credential's windows the lane reads; null when it reads none. */
+  windowKey: string | null;
 }
 
 /**
@@ -113,6 +115,8 @@ interface WindowLike {
 }
 
 interface KimiRowLike {
+  label?: string;
+  labelKey?: string;
   used: number;
   limit: number;
   resetAtMs?: number | null;
@@ -127,6 +131,7 @@ interface XaiBillingLike {
 }
 
 interface AntigravityBucketLike {
+  label?: string;
   /** Fraction 0..1 of quota REMAINING — the inverse of the percent-used providers. */
   remainingFraction?: number | null;
   resetAtMs?: number | null;
@@ -180,6 +185,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     anchorMs: null,
     periodHours: null,
     remaining: null,
+    windowKey: null,
   };
 
   if (!quota || quota.status !== 'success') return empty;
@@ -211,6 +217,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       ...empty,
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
+      windowKey: chosen.id ?? null,
       // Claude and Codex store percent USED.
       remaining:
         typeof chosen.usedPercent === 'number' ? clampPercent(100 - chosen.usedPercent) : null,
@@ -222,6 +229,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       (
         quota as {
           windows?: {
+            id: string;
             remainingPercent: number | null;
             resetAtMs: number | null;
             periodHours: number;
@@ -235,6 +243,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
       remaining: chosen.remainingPercent,
+      windowKey: chosen.id,
     };
   }
 
@@ -257,6 +266,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       // length; weekly is what `periodType` already told us.
       periodHours: billing.periodHours ?? 24 * 7,
       remaining,
+      windowKey: 'weekly',
     };
   }
 
@@ -280,6 +290,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       remaining: remainingOf(chosen),
+      windowKey: chosen.label ?? null,
     };
   }
 
@@ -299,6 +310,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       remaining: remainingOf(chosen),
+      windowKey: chosen.labelKey ?? chosen.label ?? null,
     };
   }
 
@@ -336,6 +348,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
       remaining: remainingOf(chosen),
+      windowKey: chosen.id,
     };
   }
 

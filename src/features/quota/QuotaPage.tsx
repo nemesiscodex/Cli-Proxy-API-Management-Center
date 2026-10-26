@@ -53,7 +53,7 @@ import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
 import { pruneQuotaHistory } from './quotaHistory';
-import { cacheKeyOfPoolAccountId, poolAccountId } from './quotaPoolModel';
+import { accountIdOfPoolHistoryId, cacheKeyOfPoolAccountId, poolAccountId } from './quotaPoolModel';
 import { readQuotaUiState, writeQuotaUiState } from './uiState';
 import styles from './QuotaPage.module.scss';
 
@@ -265,7 +265,10 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
 
     // Local history follows the credential list, not the enabled subset.
     const existing = new Set(files.map(getQuotaCacheKey));
-    pruneQuotaHistory(connection, (id) => existing.has(cacheKeyOfPoolAccountId(id)));
+    pruneQuotaHistory(connection, (id) => {
+      const accountId = accountIdOfPoolHistoryId(id);
+      return accountId !== null && existing.has(cacheKeyOfPoolAccountId(accountId));
+    });
   }, [connection, entries, error, files, filesGeneration, loading, sessionGeneration]);
 
   /* ---------- 加载与操作 ---------- */
