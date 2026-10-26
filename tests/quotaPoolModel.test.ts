@@ -8,6 +8,13 @@ import {
   type PoolPoint,
   type PoolViewOptions,
 } from '@/features/quota/quotaPoolModel';
+import {
+  appendQuotaSamples,
+  pruneQuotaHistory,
+  quotaHistoryKey,
+  readQuotaHistory,
+  type QuotaHistoryStorage,
+} from '@/features/quota/quotaHistory';
 import { PREMIUM_CODEX_PLAN_TYPES } from '@/utils/quota/planTier';
 
 const HOUR = 3_600_000;
@@ -288,5 +295,99 @@ describe('poolRange', () => {
 
     expect(new Date(poolRange(now, 1).startMs)).toEqual(new Date(2026, 9, 30));
     expect(new Date(poolRange(now, -1).startMs)).toEqual(new Date(2026, 9, 16));
+  });
+});
+
+const memoryStorage = (): QuotaHistoryStorage & { data: Map<string, string> } => {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+    removeItem: (key) => void data.delete(key),
+  };
+};
+
+describe('quota history store', () => {
+  const MINUTE = 60_000;
+  const LOCAL = 'http://localhost:8317';
+
+  test('skips an unchanged value within five minutes, keeps changes and later repeats', () => {
+    const storage = memoryStorage();
+    appendQuotaSamples(LOCAL, [{ id: 'claude:a.json', remaining: 80 }], NOW, storage);
+    appendQuotaSamples(LOCAL, [{ id: 'claude:a.json', remaining: 80 }], NOW + 4 * MINUTE, storage);
+    appendQuotaSamples(LOCAL, [{ id: 'claude:a.json', remaining: 79 }], NOW + 5 * MINUTE, storage);
+    appendQuotaSamples(LOCAL, [{ id: 'claude:a.json', remaining: 79 }], NOW + 11 * MINUTE, storage);
+
+    expect(readQuotaHistory(LOCAL, storage)['claude:a.json']).toEqual([
+      { atMs: NOW, remaining: 80 },
+      { atMs: NOW + 5 * MINUTE, remaining: 79 },
+      { atMs: NOW + 11 * MINUTE, remaining: 79 },
+    ]);
+  });
+
+  test('drops samples older than 21 days and keeps at most 3000 per account', () => {
+    const storage = memoryStorage();
+    appendQuotaSamples(LOCAL, [{ id: 'old', remaining: 10 }], NOW - 22 * DAY, storage);
+    appendQuotaSamples(LOCAL, [{ id: 'kept', remaining: 10 }], NOW - 20 * DAY, storage);
+    appendQuotaSamples(LOCAL, [{ id: 'kept', remaining: 20 }], NOW, storage);
+
+    const history = readQuotaHistory(LOCAL, storage);
+    expect(history.old).toBeUndefined();
+    expect(history.kept?.map((sample) => sample.remaining)).toEqual([10, 20]);
+
+    for (let index = 0; index < 3005; index += 1) {
+      appendQuotaSamples(LOCAL, [{ id: 'busy', remaining: index % 2 }], NOW + index, storage);
+    }
+    const busy = readQuotaHistory(LOCAL, storage).busy ?? [];
+    expect(busy.length).toBe(3000);
+    expect(busy[busy.length - 1]?.atMs).toBe(NOW + 3004);
+  });
+
+  test('keeps each connection separate', () => {
+    const storage = memoryStorage();
+    appendQuotaSamples(LOCAL, [{ id: 'claude:a.json', remaining: 80 }], NOW, storage);
+    appendQuotaSamples('https://remote', [{ id: 'claude:a.json', remaining: 10 }], NOW, storage);
+
+    expect(readQuotaHistory(LOCAL, storage)['claude:a.json']?.[0]?.remaining).toBe(80);
+    expect(readQuotaHistory('https://remote', storage)['claude:a.json']?.[0]?.remaining).toBe(10);
+    expect(readQuotaHistory('https://other', storage)).toEqual({});
+  });
+
+  test('ignores corrupt or foreign data instead of throwing', () => {
+    const storage = memoryStorage();
+    storage.setItem(quotaHistoryKey(LOCAL), '{not json');
+    expect(readQuotaHistory(LOCAL, storage)).toEqual({});
+
+    storage.setItem(quotaHistoryKey(LOCAL), JSON.stringify({ v: 99, accounts: {} }));
+    expect(readQuotaHistory(LOCAL, storage)).toEqual({});
+
+    storage.setItem(
+      quotaHistoryKey(LOCAL),
+      JSON.stringify({
+        v: 1,
+        accounts: { a: [[NOW, 50], ['x', 1], [NOW + 1, 400], null], b: 'nope' },
+      })
+    );
+    expect(readQuotaHistory(LOCAL, storage)).toEqual({ a: [{ atMs: NOW, remaining: 50 }] });
+
+    appendQuotaSamples(LOCAL, [{ id: 'a', remaining: 40 }], NOW + HOUR, storage);
+    expect(readQuotaHistory(LOCAL, storage).a?.length).toBe(2);
+  });
+
+  test('prunes accounts whose credential is gone', () => {
+    const storage = memoryStorage();
+    appendQuotaSamples(
+      LOCAL,
+      [
+        { id: 'claude:gone.json', remaining: 10 },
+        { id: 'claude:here.json', remaining: 20 },
+      ],
+      NOW,
+      storage
+    );
+    pruneQuotaHistory(LOCAL, (id) => id !== 'claude:gone.json', storage);
+
+    expect(Object.keys(readQuotaHistory(LOCAL, storage))).toEqual(['claude:here.json']);
   });
 });
