@@ -52,6 +52,7 @@ import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
+import { useServerQuotaHistory } from './hooks/useServerQuotaHistory';
 import { pruneQuotaHistory } from './quotaHistory';
 import { accountIdOfPoolHistoryId, cacheKeyOfPoolAccountId, poolAccountId } from './quotaPoolModel';
 import { readQuotaUiState, writeQuotaUiState } from './uiState';
@@ -275,6 +276,7 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
 
   const { batchLoading, loadQuota } = useQuotaBatchLoader();
   const { resettingQuotaName, refreshQuota, resetQuota } = useQuotaActions(disableControls);
+  const loadServerHistory = useServerQuotaHistory(connection, !disableControls);
 
   // The embed has no "Refresh all" button, so it starts with one already requested.
   const pendingRefreshRef = useRef<number | null>(embedded ? sessionGeneration : null);
@@ -285,7 +287,8 @@ export function QuotaPage({ embedded = false }: { embedded?: boolean }) {
     if (disableControls) return;
     pendingRefreshRef.current = sessionGeneration;
     void loadFiles();
-  }, [disableControls, loadFiles, sessionGeneration]);
+    void loadServerHistory();
+  }, [disableControls, loadFiles, loadServerHistory, sessionGeneration]);
 
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;

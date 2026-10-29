@@ -1,10 +1,11 @@
 /**
  * Local quota history: one `{atMs, remaining}` sample per account per
- * successful quota load. The backend keeps no history, so the pool chart's
- * recorded line and burn rates come only from what this browser has seen.
+ * successful quota load, stored in localStorage under one key per connection
+ * (management API base), so switching connections never mixes two servers'
+ * accounts.
  *
- * Stored in localStorage under one key per connection (management API base),
- * so switching connections never mixes two servers' accounts.
+ * A server that polls quota itself also serves its own history. That is held
+ * in memory only and merged over the local history when read for the pool.
  */
 
 import { DAY_MS, MINUTE_MS } from '@/utils/time/durations';
@@ -40,7 +41,7 @@ const browserStorage = (): QuotaHistoryStorage | null => {
   }
 };
 
-const isSampleTuple = (value: unknown): value is [number, number] =>
+export const isSampleTuple = (value: unknown): value is [number, number] =>
   Array.isArray(value) &&
   value.length === 2 &&
   typeof value[0] === 'number' &&
@@ -93,6 +94,11 @@ export const subscribeQuotaHistory = (listener: () => void): (() => void) => {
 
 export const getQuotaHistoryVersion = (): number => version;
 
+const notify = () => {
+  version += 1;
+  listeners.forEach((listener) => listener());
+};
+
 function write(
   storage: QuotaHistoryStorage,
   connection: string,
@@ -105,8 +111,7 @@ function write(
     // Storage full or blocked: history is a nicety, never a reason to fail a load.
     return;
   }
-  version += 1;
-  listeners.forEach((listener) => listener());
+  notify();
 }
 
 /* ----------------------------------------------------------------- API */
@@ -174,4 +179,38 @@ export function pruneQuotaHistory(
   const kept = ids.filter(keep);
   if (kept.length === ids.length) return;
   write(storage, connection, Object.fromEntries(kept.map((id) => [id, [...history[id]]])));
+}
+
+/* ------------------------------------------------------ server history */
+
+let serverHistory: { connection: string; history: QuotaHistory } | null = null;
+
+export function setServerQuotaHistory(connection: string, history: QuotaHistory): void {
+  serverHistory = { connection, history };
+  notify();
+}
+
+/**
+ * Union per history id, ascending, one sample per instant (the server's when
+ * both have one).
+ */
+export function mergeQuotaHistory(local: QuotaHistory, server: QuotaHistory): QuotaHistory {
+  const merged: Record<string, readonly PoolSample[]> = { ...local };
+  for (const [id, samples] of Object.entries(server)) {
+    const byTime = new Map<number, PoolSample>();
+    for (const sample of [...(local[id] ?? []), ...samples]) byTime.set(sample.atMs, sample);
+    merged[id] = Array.from(byTime.values()).sort((a, b) => a.atMs - b.atMs);
+  }
+  return merged;
+}
+
+/** What the pool reads: local history with this connection's server history merged in. */
+export function readPoolHistory(
+  connection: string,
+  storage: QuotaHistoryStorage | null = browserStorage()
+): QuotaHistory {
+  const local = readQuotaHistory(connection, storage);
+  return serverHistory?.connection === connection
+    ? mergeQuotaHistory(local, serverHistory.history)
+    : local;
 }
