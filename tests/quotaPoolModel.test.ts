@@ -135,7 +135,7 @@ describe('buildPoolView projection', () => {
     expect(view.remaining).toBe(120);
   });
 
-  test('the pool is not empty while an account with no burn data holds quota', () => {
+  test("an empty account's usage moves to the accounts that still hold quota", () => {
     const view = buildPoolView(
       [
         account({ id: 'drains', remaining: 20, history: draining(20, 10) }),
@@ -145,7 +145,37 @@ describe('buildPoolView projection', () => {
     );
 
     expect(view.firstEmpty).toEqual({ label: 'drains', atMs: NOW + 2 * HOUR });
-    expect(view.poolEmptyAtMs).toBeNull();
+    expect(valuesAt(view.projected, NOW + 2 * HOUR)).toEqual([40]);
+    expect(view.poolEmptyAtMs).toBe(NOW + 6 * HOUR);
+  });
+
+  test('moved usage splits by recent burn and returns to an account after its reset', () => {
+    const view = buildPoolView(
+      [
+        account({
+          id: 'a',
+          remaining: 10,
+          resetAtMs: NOW + 3 * HOUR,
+          periodHours: 168,
+          history: draining(10, 10),
+        }),
+        account({ id: 'b', remaining: 80, history: draining(80, 10) }),
+        account({ id: 'c', remaining: 80, history: draining(80, 5) }),
+      ],
+      options()
+    );
+    const accountAt = (id: string, atMs: number) =>
+      valuesAt(view.perAccount.find((series) => series.id === id)?.projected ?? [], atMs);
+
+    // a empties after 1h; its 10/h splits 2:1 onto b and c until a resets at 3h.
+    expect(accountAt('a', NOW + HOUR)).toEqual([0]);
+    expect(accountAt('b', NOW + 3 * HOUR)[0]).toBeCloseTo(80 - 10 - (2 * 50) / 3);
+    expect(accountAt('c', NOW + 3 * HOUR)[0]).toBeCloseTo(80 - 5 - (2 * 25) / 3);
+    // After a resets its own burn is back on a, so b drains 10/h from 36.7.
+    expect(accountAt('a', NOW + 3 * HOUR)).toEqual([0, 100]);
+    const bSeries = view.perAccount.find((series) => series.id === 'b')?.projected ?? [];
+    const bEmptyAtMs = bSeries.find((point) => point.value === 0)?.atMs ?? 0;
+    expect((bEmptyAtMs - NOW) / HOUR).toBeCloseTo(3 + 11 / 3);
   });
 
   test('an account that never resets still counts, an unloaded one does not', () => {
@@ -192,7 +222,7 @@ describe('buildPoolView projection', () => {
     expect(view.firstEmpty).toBeNull();
   });
 
-  test('drain rate steps down when an account empties and back up after its reset', () => {
+  test('drain rate holds while another account takes over an empty one', () => {
     const view = buildPoolView(
       [
         account({
@@ -208,8 +238,10 @@ describe('buildPoolView projection', () => {
     );
 
     expect(valuesAt(view.drain.projected, NOW)).toEqual([15]);
-    expect(valuesAt(view.drain.projected, NOW + 2 * HOUR)).toEqual([15, 5]);
-    expect(valuesAt(view.drain.projected, NOW + 4 * HOUR)).toEqual([5, 15]);
+    expect(valuesAt(view.drain.projected, NOW + 2 * HOUR)).toEqual([15]);
+    expect(valuesAt(view.drain.projected, NOW + 4 * HOUR)).toEqual([15]);
+    // At 4h a is back to 100 at 10/h and b holds 90 - 2 * 5 - 2 * 15 = 50 at 5/h.
+    expect(view.poolEmptyAtMs).toBe(NOW + 14 * HOUR);
   });
 });
 
@@ -470,14 +502,16 @@ describe('QuotaPoolCard rendering', () => {
     expect(markup).toContain('Pro 200 = 2.5x');
     expect(markup).toContain('Burn, last 3h');
     expect(markup).toContain('5.0%/h');
-    // Codex 1 empties after 20h, then its reset adds 2.5 x 100.
+    // Codex 1 empties after 20h, its 5%/h moves to Codex 2, which empties 10h later.
+    expect(markup).toContain('Empty ');
+    // Codex 1's reset then adds 2.5 x 100.
     expect(markup).toContain('<strong>+250%</strong>');
     expect(markup).toContain('Codex 1 in 20h 0m');
   });
 
   test('names the chart for assistive technology', () => {
     expect(render()).toMatch(
-      /role="img" aria-label="Codex pool: 150% of 350% remaining\. Pool empty: Not by [^"]+\. Burn: 5\.0%\/h\."/
+      /role="img" aria-label="Codex pool: 150% of 350% remaining\. Pool empty: [^"]+\. Burn: 5\.0%\/h\."/
     );
   });
 

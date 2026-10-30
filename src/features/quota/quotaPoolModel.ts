@@ -282,6 +282,13 @@ interface AccountProjection {
   emptyAtMs: number | null;
 }
 
+interface ProjectionInput {
+  account: PoolAccount;
+  startValue: number;
+  /** Own recent burn, account percent per hour. */
+  ratePerHour: number;
+}
+
 function resetInstants(account: PoolAccount, fromMs: number, toMs: number): number[] {
   if (account.resetAtMs === null || !account.periodHours) return [];
   return windowsIn(account.resetAtMs, account.periodHours * HOUR_MS, fromMs, toMs)
@@ -290,44 +297,78 @@ function resetInstants(account: PoolAccount, fromMs: number, toMs: number): numb
 }
 
 /**
- * Drain linearly at `ratePerHour`, floor at 0, jump to 100 at every reset.
- * A reported reset that already passed means the account is full again.
+ * Account percent per hour for each account. The pool's demand stays the same
+ * when an account runs out: it moves to the accounts that still hold quota, split
+ * by their own recent burn, or evenly by size when none of them has any.
  */
-function projectAccount(
-  account: PoolAccount,
-  startValue: number,
-  ratePerHour: number,
+function allocateBurn(inputs: readonly ProjectionInput[], values: readonly number[]): number[] {
+  const demand = inputs.reduce(
+    (sum, { account, ratePerHour }) => sum + ratePerHour * account.weight,
+    0
+  );
+  const holding = inputs.map((_, index) => values[index] > 0);
+  let ownBurn = 0;
+  let holdingWeight = 0;
+  inputs.forEach(({ account, ratePerHour }, index) => {
+    if (!holding[index]) return;
+    ownBurn += ratePerHour * account.weight;
+    holdingWeight += account.weight;
+  });
+  if (!(demand > 0) || holdingWeight === 0) return inputs.map(() => 0);
+  return inputs.map(({ ratePerHour }, index) => {
+    if (!holding[index]) return 0;
+    return ownBurn > 0 ? (ratePerHour * demand) / ownBurn : demand / holdingWeight;
+  });
+}
+
+/**
+ * Drain every account at its share of the pool's burn, floor at 0, jump to 100
+ * at every reset. Shares change only when an account empties or resets.
+ */
+function projectAccounts(
+  inputs: readonly ProjectionInput[],
   nowMs: number,
   endMs: number
-): AccountProjection {
-  let atMs = nowMs;
-  let value = startValue;
-  const points: PoolPoint[] = [{ atMs, value }];
-  let emptyAtMs: number | null = value <= 0 ? nowMs : null;
-
-  const resets = resetInstants(account, nowMs, endMs);
-  const stops = resets.map((stopMs) => ({ stopMs, reset: true }));
-  if (resets[resets.length - 1] !== endMs) stops.push({ stopMs: endMs, reset: false });
-
-  for (const { stopMs, reset } of stops) {
-    if (value > 0 && ratePerHour > 0) {
-      const hitsZeroMs = atMs + (value / ratePerHour) * HOUR_MS;
-      if (hitsZeroMs <= stopMs) {
-        points.push({ atMs: hitsZeroMs, value: 0 });
-        emptyAtMs ??= hitsZeroMs;
-        value = 0;
-        atMs = hitsZeroMs;
-      }
+): AccountProjection[] {
+  const values = inputs.map(({ startValue }) => startValue);
+  const out: AccountProjection[] = values.map((value) => ({
+    points: [{ atMs: nowMs, value }],
+    emptyAtMs: value <= 0 ? nowMs : null,
+  }));
+  const resetsAt = new Map<number, number[]>();
+  inputs.forEach(({ account }, index) => {
+    for (const atMs of resetInstants(account, nowMs, endMs)) {
+      resetsAt.set(atMs, [...(resetsAt.get(atMs) ?? []), index]);
     }
-    value = value > 0 ? Math.max(0, value - (ratePerHour * (stopMs - atMs)) / HOUR_MS) : 0;
-    atMs = stopMs;
-    points.push({ atMs, value });
-    if (reset) {
-      value = ACCOUNT_FULL;
-      points.push({ atMs, value });
+  });
+  const stops = [...resetsAt.keys(), endMs].sort((a, b) => a - b);
+
+  let atMs = nowMs;
+  for (const stopMs of stops) {
+    while (atMs < stopMs) {
+      const rates = allocateBurn(inputs, values);
+      const hitsZeroMs = rates.map((rate, index) =>
+        rate > 0 ? atMs + (values[index] / rate) * HOUR_MS : Infinity
+      );
+      const nextMs = Math.min(stopMs, ...hitsZeroMs);
+      rates.forEach((rate, index) => {
+        if (rate <= 0) return;
+        if (hitsZeroMs[index] <= nextMs) {
+          values[index] = 0;
+          out[index].emptyAtMs ??= nextMs;
+        } else {
+          values[index] -= (rate * (nextMs - atMs)) / HOUR_MS;
+        }
+      });
+      atMs = nextMs;
+      values.forEach((value, index) => out[index].points.push({ atMs, value }));
+    }
+    for (const index of resetsAt.get(stopMs) ?? []) {
+      values[index] = ACCOUNT_FULL;
+      out[index].points.push({ atMs: stopMs, value: ACCOUNT_FULL });
     }
   }
-  return { points, emptyAtMs };
+  return out;
 }
 
 /* ------------------------------------------------------ series algebra */
@@ -504,16 +545,17 @@ export function buildPoolView(accounts: readonly PoolAccount[], opts: PoolViewOp
   const pooled = accounts.filter((account) => account.remaining !== null);
 
   let burnPerHour: number | null = null;
-  const projections = pooled.map((account) => {
+  const inputs = pooled.map((account): ProjectionInput => {
     const rate = accountBurnRate(account.history, nowMs, burnWindowHours);
     if (rate !== null) burnPerHour = (burnPerHour ?? 0) + rate * account.weight;
     const resetPassed = account.resetAtMs !== null && account.resetAtMs <= nowMs;
     const startValue = resetPassed ? ACCOUNT_FULL : (account.remaining as number);
-    return {
-      account,
-      ...projectAccount(account, startValue, (rate ?? 0) * multiplier, nowMs, endMs),
-    };
+    return { account, startValue, ratePerHour: (rate ?? 0) * multiplier };
   });
+  const projections = projectAccounts(inputs, nowMs, endMs).map((projection, index) => ({
+    account: pooled[index],
+    ...projection,
+  }));
 
   const weightedProjections = projections.map(({ account, points }) =>
     scale(points, account.weight)
